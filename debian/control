@@ -1,8 +1,9 @@
 Source: conmon
 Section: admin
 Priority: optional
-Maintainer: Podman Packaging Team <team+podman@tracker.debian.org>
-Uploaders: Jamie Bliss <jamie@ivyleav.es>,
+Maintainer: Pexip AS <packaging@pexip.com>
+XSBC-Pexip-Original-Maintainer: Podman Packaging Team <team+podman@tracker.debian.org>
+XSBC-Pexip-Original-Uploaders: Jamie Bliss <jamie@ivyleav.es>,
            Nicolas Braud-Santoni <nicoo@debian.org>,
            Dmitry Smirnov <onlyjob@debian.org>,
            Reinhard Tartler <siretart@tauware.de>,
@@ -16,6 +17,7 @@ Homepage: https://github.com/containers/conmon
 Vcs-Browser: https://salsa.debian.org/podman-team/conmon
 Vcs-Git: https://salsa.debian.org/podman-team/conmon.git
 Rules-Requires-Root: no
+XS-Pexip-Upstream: http://ftp.debian.org/debian/ bookworm
 
 Package: conmon
 Architecture: any

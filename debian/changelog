@@ -1,3 +1,9 @@
+conmon (2.1.6+ds1-1pexip1) pexip; urgency=medium
+
+  * Prepare Pexip packaging
+
+ -- John-Mark Bell <jmb@pexip.com>  Thu, 27 Jul 2023 17:20:19 +0000
+
 conmon (2.1.6+ds1-1) unstable; urgency=medium
 
   * New upstream release
