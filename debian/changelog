@@ -1,6 +1,7 @@
 conmon (2.1.6+ds1-1+pexip24u5) pexip; urgency=medium
 
   * Fix newline handling in journald log handler.
+  * Do not write zeros beyond end of buffer.
 
  -- Mark Hymers <mark.hymers@pexip.com>  Wed, 06 Mar 2024 16:17:45 +0000
 

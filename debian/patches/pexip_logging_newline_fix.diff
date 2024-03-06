@@ -1,8 +1,16 @@
-Index: conmon-2.1.6+ds1/src/ctr_logging.c
+Index: os-conmon/src/ctr_logging.c
 ===================================================================
---- conmon-2.1.6+ds1.orig/src/ctr_logging.c
-+++ conmon-2.1.6+ds1/src/ctr_logging.c
-@@ -297,6 +297,12 @@ static int write_journald(int pipe, char
+--- os-conmon.orig/src/ctr_logging.c
++++ os-conmon/src/ctr_logging.c
+@@ -289,7 +289,6 @@ static int write_journald(int pipe, char
+ 		}
+ 
+ 		ssize_t msg_len = line_len + MESSAGE_EQ_LEN + *partial_buf_len;
+-		partial_buf[*partial_buf_len] = '\0';
+ 
+ 		_cleanup_free_ char *message = g_malloc(msg_len);
+ 
+@@ -297,6 +296,12 @@ static int write_journald(int pipe, char
  		memcpy(message + MESSAGE_EQ_LEN, partial_buf, *partial_buf_len);
  		memcpy(message + MESSAGE_EQ_LEN + *partial_buf_len, buf, line_len);
  
