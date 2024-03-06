@@ -1,0 +1,17 @@
+Index: conmon-2.1.6+ds1/src/ctr_logging.c
+===================================================================
+--- conmon-2.1.6+ds1.orig/src/ctr_logging.c
++++ conmon-2.1.6+ds1/src/ctr_logging.c
+@@ -297,6 +297,12 @@ static int write_journald(int pipe, char
+ 		memcpy(message + MESSAGE_EQ_LEN, partial_buf, *partial_buf_len);
+ 		memcpy(message + MESSAGE_EQ_LEN + *partial_buf_len, buf, line_len);
+ 
++		/* Ensure that we do not pass newlines to the logging function
++		 * as this results in double newlines where journald passes to syslog */
++		if (line_len > 0 && buf[line_len-1] == '\n') {
++			msg_len--;
++		}
++
+ 		if (writev_buffer_append_segment(dev_null, &bufv, message, msg_len) < 0)
+ 			return -1;
+ 
