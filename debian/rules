@@ -17,10 +17,6 @@ override_dh_auto_build:
 	dh_auto_build
 	make -C docs docs GOMD2MAN=/usr/bin/go-md2man
 
-# Upstream's `make clean` target is broken
-override_dh_auto_clean:
-	:
-
 # Upstream's `make test` target doesn't work either
 override_dh_auto_test:
 	:

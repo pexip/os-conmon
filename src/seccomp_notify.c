@@ -7,7 +7,6 @@
 
 #include <errno.h>
 #include <sys/ioctl.h>
-#include <dlfcn.h>
 #include <sys/wait.h>
 #include <sys/mount.h>
 #include <signal.h>
@@ -19,6 +18,7 @@
 
 #ifdef USE_SECCOMP
 
+#include <dlfcn.h>
 #include <sys/sysmacros.h>
 #include <linux/seccomp.h>
 #include <seccomp.h>
@@ -76,6 +76,10 @@ gboolean seccomp_accept_cb(int fd, G_GNUC_UNUSED GIOCondition condition, G_GNUC_
 	struct file_t listener = recvfd(connfd);
 	close(connfd);
 
+	if (listener.fd < 0) {
+		pexit("Failed to receive socket listener file descriptor");
+	}
+
 	_cleanup_free_ char *oci_config_path = g_strdup_printf("%s/config.json", opt_bundle_path);
 	if (oci_config_path == NULL) {
 		nwarn("Failed to allocate memory");
@@ -110,7 +114,6 @@ int seccomp_notify_plugins_load(struct seccomp_notify_context_s **out, const cha
 
 	if (seccomp_syscall(SECCOMP_GET_NOTIF_SIZES, 0, &ctx->sizes) < 0) {
 		pexit("Failed to get notifications size");
-		return -1;
 	}
 
 	ctx->sreq = xmalloc0(ctx->sizes.seccomp_notif);
@@ -125,7 +128,6 @@ int seccomp_notify_plugins_load(struct seccomp_notify_context_s **out, const cha
 	b = strdup(plugins);
 	if (b == NULL) {
 		pexit("Failed to strdup");
-		return -1;
 	}
 	for (s = 0, it = strtok_r(b, ":", &saveptr); it; s++, it = strtok_r(NULL, ":", &saveptr)) {
 		run_oci_seccomp_notify_plugin_version_cb version_cb;
@@ -135,7 +137,6 @@ int seccomp_notify_plugins_load(struct seccomp_notify_context_s **out, const cha
 		ctx->plugins[s].handle = dlopen(it, RTLD_NOW);
 		if (ctx->plugins[s].handle == NULL) {
 			pexitf("cannot load `%s`: %s", it, dlerror());
-			return -1;
 		}
 
 		version_cb = (run_oci_seccomp_notify_plugin_version_cb)dlsym(ctx->plugins[s].handle, "run_oci_seccomp_notify_version");
@@ -145,7 +146,6 @@ int seccomp_notify_plugins_load(struct seccomp_notify_context_s **out, const cha
 			version = version_cb();
 			if (version != 1) {
 				pexitf("invalid version supported by the plugin `%s`", it);
-				return -1;
 			}
 		}
 
@@ -153,7 +153,6 @@ int seccomp_notify_plugins_load(struct seccomp_notify_context_s **out, const cha
 			(run_oci_seccomp_notify_handle_request_cb)dlsym(ctx->plugins[s].handle, "run_oci_seccomp_notify_handle_request");
 		if (ctx->plugins[s].handle_request_cb == NULL) {
 			pexitf("plugin `%s` doesn't export `run_oci_seccomp_notify_handle_request`", it);
-			return -1;
 		}
 
 		start_cb = (run_oci_seccomp_notify_start_cb)dlsym(ctx->plugins[s].handle, "run_oci_seccomp_notify_start");
@@ -163,7 +162,6 @@ int seccomp_notify_plugins_load(struct seccomp_notify_context_s **out, const cha
 			ret = start_cb(&opq, conf, sizeof(*conf));
 			if (ret != 0) {
 				pexitf("error loading `%s`", it);
-				return -1;
 			}
 		}
 		ctx->plugins[s].opaque = opq;
@@ -223,7 +221,6 @@ int seccomp_notify_plugins_event(struct seccomp_notify_context_s *ctx, int secco
 
 			default:
 				pexitf("Unknown handler action specified %d", handled);
-				return -1;
 			}
 		}
 	}

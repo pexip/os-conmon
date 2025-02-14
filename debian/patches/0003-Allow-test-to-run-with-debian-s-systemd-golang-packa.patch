@@ -1,0 +1,22 @@
+From: Reinhard Tartler <siretart@tauware.de>
+Date: Wed, 23 Oct 2024 06:33:41 -0400
+Subject: Allow test to run with debian's systemd golang package
+
+Forwarded: not-needed
+---
+ runner/conmon_test/suite_test.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/runner/conmon_test/suite_test.go b/runner/conmon_test/suite_test.go
+index 7947386..1616c7d 100644
+--- a/runner/conmon_test/suite_test.go
++++ b/runner/conmon_test/suite_test.go
+@@ -11,7 +11,7 @@ import (
+ 	"testing"
+ 
+ 	"github.com/containers/conmon/runner/conmon"
+-	"github.com/coreos/go-systemd/v22/sdjournal"
++	"github.com/coreos/go-systemd/sdjournal"
+ 	. "github.com/onsi/ginkgo/v2"
+ 	. "github.com/onsi/gomega"
+ )
