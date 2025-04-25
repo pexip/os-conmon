@@ -34,9 +34,12 @@ static void disconnect_std_streams(int dev_null_r, int dev_null_w)
 		pexit("Failed to dup over stderr");
 }
 
+#define DEFAULT_UMASK 0022
+
 int main(int argc, char *argv[])
 {
 	setlocale(LC_ALL, "");
+	umask(DEFAULT_UMASK);
 	_cleanup_gerror_ GError *err = NULL;
 	char buf[BUF_SIZE];
 	int num_read;
@@ -51,7 +54,7 @@ int main(int argc, char *argv[])
 
 	process_cli();
 
-	attempt_oom_adjust("-1000");
+	attempt_oom_adjust(-1000);
 
 	/* ignoring SIGPIPE prevents conmon from being spuriously killed */
 	signal(SIGPIPE, SIG_IGN);
@@ -204,7 +207,7 @@ int main(int argc, char *argv[])
 
 		if (opt_attach) {
 			ndebug("sending attach message to parent");
-			write_sync_fd(attach_pipe_fd, 0, NULL);
+			write_or_close_sync_fd(&attach_pipe_fd, 0, NULL);
 			ndebug("sent attach message to parent");
 		}
 	}
@@ -232,25 +235,29 @@ int main(int argc, char *argv[])
 			_pexit("Failed to unblock signals");
 
 		if (!logging_is_passthrough()) {
+			/*
+			 * EINVAL indicates the type of file descriptor used is not supporting fchmod(2) on the given platform.
+			 * Only more unusual cases are logged.
+			 */
 			if (workerfd_stdin < 0)
 				workerfd_stdin = dev_null_r;
 			if (dup2(workerfd_stdin, STDIN_FILENO) < 0)
 				_pexit("Failed to dup over stdin");
-			if (workerfd_stdin != dev_null_r && isatty(workerfd_stdin) && fchmod(STDIN_FILENO, 0777) < 0)
+			if (workerfd_stdin != dev_null_r && fchmod(STDIN_FILENO, 0777) < 0 && errno != EINVAL)
 				nwarn("Failed to chmod stdin");
 
 			if (workerfd_stdout < 0)
 				workerfd_stdout = dev_null_w;
 			if (dup2(workerfd_stdout, STDOUT_FILENO) < 0)
 				_pexit("Failed to dup over stdout");
-			if (workerfd_stdout != dev_null_w && isatty(workerfd_stdout) && fchmod(STDOUT_FILENO, 0777) < 0)
+			if (workerfd_stdout != dev_null_w && fchmod(STDOUT_FILENO, 0777) < 0 && errno != EINVAL)
 				nwarn("Failed to chmod stdout");
 
 			if (workerfd_stderr < 0)
 				workerfd_stderr = workerfd_stdout;
 			if (dup2(workerfd_stderr, STDERR_FILENO) < 0)
 				_pexit("Failed to dup over stderr");
-			if (workerfd_stderr != dev_null_w && isatty(workerfd_stderr) && fchmod(STDERR_FILENO, 0777) < 0)
+			if (workerfd_stderr != dev_null_w && fchmod(STDERR_FILENO, 0777) < 0 && errno != EINVAL)
 				nwarn("Failed to chmod stderr");
 		}
 		/* If LISTEN_PID env is set, we need to set the LISTEN_PID
@@ -287,7 +294,7 @@ int main(int argc, char *argv[])
 		}
 
 		// We don't want runc to be unkillable so we reset the oom_score_adj back to 0
-		attempt_oom_adjust("0");
+		reset_oom_adjust();
 		execv(g_ptr_array_index(runtime_argv, 0), (char **)runtime_argv->pdata);
 		exit(127);
 	}
@@ -372,7 +379,7 @@ int main(int argc, char *argv[])
 				if (opt_exec && container_status > 0) {
 					to_report = -1 * container_status;
 				}
-				write_sync_fd(sync_pipe_fd, to_report, buf);
+				write_or_close_sync_fd(&sync_pipe_fd, to_report, buf);
 			}
 		}
 		nexitf("Failed to create container: exit status %d", get_exit_status(runtime_status));
@@ -399,7 +406,7 @@ int main(int argc, char *argv[])
 	 * Thus, if we are legacy and we are exec, skip this write.
 	 */
 	if ((opt_api_version >= 1 || !opt_exec) && sync_pipe_fd >= 0)
-		write_sync_fd(sync_pipe_fd, container_pid, NULL);
+		write_or_close_sync_fd(&sync_pipe_fd, container_pid, NULL);
 
 #ifdef __linux__
 	setup_oom_handling(container_pid);
@@ -519,7 +526,7 @@ int main(int argc, char *argv[])
 
 	/* Send the command exec exit code back to the parent */
 	if (opt_exec && sync_pipe_fd >= 0)
-		write_sync_fd(sync_pipe_fd, exit_status, exit_message);
+		write_or_close_sync_fd(&sync_pipe_fd, exit_status, exit_message);
 
 	if (attach_symlink_dir_path != NULL && unlink(attach_symlink_dir_path) == -1 && errno != ENOENT)
 		pexit("Failed to remove symlink for attach socket directory");

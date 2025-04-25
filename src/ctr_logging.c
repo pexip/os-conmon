@@ -3,6 +3,7 @@
 #include "cli.h"
 #include "config.h"
 #include <string.h>
+#include <sys/stat.h>
 
 // if the systemd development files were found, we can log to systemd
 #ifdef USE_JOURNALD
@@ -40,6 +41,8 @@ static int64_t log_global_size_max = -1;
 /* k8s log file parameters */
 static int k8s_log_fd = -1;
 static char *k8s_log_path = NULL;
+static int64_t k8s_bytes_written;
+static int64_t k8s_total_bytes_written;
 
 /* journald log file parameters */
 // short ID length
@@ -82,6 +85,7 @@ static int write_journald(int pipe, char *buf, ssize_t num_read);
 static int write_k8s_log(stdpipe_t pipe, const char *buf, ssize_t buflen);
 static bool get_line_len(ptrdiff_t *line_len, const char *buf, ssize_t buflen);
 static ssize_t writev_buffer_append_segment(int fd, writev_buffer_t *buf, const void *data, ssize_t len);
+static ssize_t writev_buffer_append_segment_no_flush(writev_buffer_t *buf, const void *data, ssize_t len);
 static ssize_t writev_buffer_flush(int fd, writev_buffer_t *buf);
 static int set_k8s_timestamp(char *buf, ssize_t buflen, const char *pipename);
 static void reopen_k8s_file(void);
@@ -112,6 +116,15 @@ void configure_log_drivers(gchar **log_drivers, int64_t log_size_max_, int64_t l
 		k8s_log_fd = open(k8s_log_path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0600);
 		if (k8s_log_fd < 0)
 			pexit("Failed to open log file");
+
+		struct stat statbuf;
+		if (fstat(k8s_log_fd, &statbuf) == 0) {
+			k8s_bytes_written = statbuf.st_size;
+		} else {
+			nwarnf("Could not stat log file %s, assuming 0 size", k8s_log_path);
+			k8s_bytes_written = 0;
+		}
+		k8s_total_bytes_written = k8s_bytes_written;
 
 		if (!use_journald_logging && tag)
 			nexit("k8s-file doesn't support --log-tag");
@@ -190,9 +203,6 @@ static void parse_log_path(char *log_config)
 	}
 
 	if (!strcmp(driver, "passthrough")) {
-		if (isatty(STDIN_FILENO) || isatty(STDOUT_FILENO) || isatty(STDERR_FILENO))
-			nexitf("cannot use a tty with passthrough logging mode to prevent attacks via TIOCSTI");
-
 		use_logging_passthrough = TRUE;
 		return;
 	}
@@ -251,13 +261,6 @@ static int write_journald(int pipe, char *buf, ssize_t buflen)
 	char *partial_buf;
 	size_t *partial_buf_len;
 
-	/* When using writev_buffer_append_segment, we should never approach the number of
-	 * entries necessary to flush the buffer. Therefore, the fd passed in is for /dev/null
-	 */
-	_cleanup_close_ int dev_null = open("/dev/null", O_WRONLY | O_CLOEXEC);
-	if (dev_null < 0)
-		pexit("Failed to open /dev/null");
-
 	/* Since we know the priority values for the journal (6 being log info and 3 being log err
 	 * we can set it statically here. This will also save on runtime, at the expense of needing
 	 * to be changed if this convention is changed.
@@ -297,30 +300,30 @@ static int write_journald(int pipe, char *buf, ssize_t buflen)
 		memcpy(message + MESSAGE_EQ_LEN, partial_buf, *partial_buf_len);
 		memcpy(message + MESSAGE_EQ_LEN + *partial_buf_len, buf, line_len);
 
-		if (writev_buffer_append_segment(dev_null, &bufv, message, msg_len) < 0)
+		if (writev_buffer_append_segment_no_flush(&bufv, message, msg_len) < 0)
 			return -1;
 
-		if (writev_buffer_append_segment(dev_null, &bufv, container_id_full, cuuid_len + CID_FULL_EQ_LEN) < 0)
+		if (writev_buffer_append_segment_no_flush(&bufv, container_id_full, cuuid_len + CID_FULL_EQ_LEN) < 0)
 			return -1;
 
-		if (writev_buffer_append_segment(dev_null, &bufv, message_priority, PRIORITY_EQ_LEN) < 0)
+		if (writev_buffer_append_segment_no_flush(&bufv, message_priority, PRIORITY_EQ_LEN) < 0)
 			return -1;
 
-		if (writev_buffer_append_segment(dev_null, &bufv, container_id, TRUNC_ID_LEN + CID_EQ_LEN) < 0)
+		if (writev_buffer_append_segment_no_flush(&bufv, container_id, TRUNC_ID_LEN + CID_EQ_LEN) < 0)
 			return -1;
 
-		if (container_tag && writev_buffer_append_segment(dev_null, &bufv, container_tag, container_tag_len) < 0)
+		if (container_tag && writev_buffer_append_segment_no_flush(&bufv, container_tag, container_tag_len) < 0)
 			return -1;
 
 		/* only print the name if we have a name to print */
-		if (name && writev_buffer_append_segment(dev_null, &bufv, container_name, name_len + NAME_EQ_LEN) < 0)
+		if (name && writev_buffer_append_segment_no_flush(&bufv, container_name, name_len + NAME_EQ_LEN) < 0)
 			return -1;
 
-		if (writev_buffer_append_segment(dev_null, &bufv, syslog_identifier, syslog_identifier_len) < 0)
+		if (writev_buffer_append_segment_no_flush(&bufv, syslog_identifier, syslog_identifier_len) < 0)
 			return -1;
 
 		/* per docker journald logging format, CONTAINER_PARTIAL_MESSAGE is set to true if it's partial, but otherwise not set. */
-		if (partial && writev_buffer_append_segment(dev_null, &bufv, "CONTAINER_PARTIAL_MESSAGE=true", PARTIAL_MESSAGE_EQ_LEN) < 0)
+		if (partial && writev_buffer_append_segment_no_flush(&bufv, "CONTAINER_PARTIAL_MESSAGE=true", PARTIAL_MESSAGE_EQ_LEN) < 0)
 			return -1;
 
 		int err = sd_journal_sendv(bufv.iov, bufv.iovcnt);
@@ -345,9 +348,7 @@ static int write_journald(int pipe, char *buf, ssize_t buflen)
 static int write_k8s_log(stdpipe_t pipe, const char *buf, ssize_t buflen)
 {
 	writev_buffer_t bufv = {0};
-	static int64_t bytes_written = 0;
 	int64_t bytes_to_be_written = 0;
-	static int64_t total_bytes_written = 0;
 
 	/*
 	 * Use the same timestamp for every line of the log in this buffer.
@@ -372,7 +373,7 @@ static int write_k8s_log(stdpipe_t pipe, const char *buf, ssize_t buflen)
 		}
 
 		/* If the caller specified a global max, enforce it before writing */
-		if (log_global_size_max > 0 && total_bytes_written >= log_global_size_max)
+		if (log_global_size_max > 0 && k8s_total_bytes_written >= log_global_size_max)
 			break;
 
 		/*
@@ -380,9 +381,7 @@ static int write_k8s_log(stdpipe_t pipe, const char *buf, ssize_t buflen)
 		 * log size. We also reset the state so that the new file is started with
 		 * a timestamp.
 		 */
-		if ((log_size_max > 0) && (bytes_written + bytes_to_be_written) > log_size_max) {
-			bytes_written = 0;
-
+		if ((log_size_max > 0) && (k8s_bytes_written + bytes_to_be_written) > log_size_max) {
 			if (writev_buffer_flush(k8s_log_fd, &bufv) < 0) {
 				nwarn("failed to flush buffer to log");
 				/*
@@ -427,8 +426,8 @@ static int write_k8s_log(stdpipe_t pipe, const char *buf, ssize_t buflen)
 			}
 		}
 
-		bytes_written += bytes_to_be_written;
-		total_bytes_written += bytes_to_be_written;
+		k8s_bytes_written += bytes_to_be_written;
+		k8s_total_bytes_written += bytes_to_be_written;
 	next:
 		/* Update the head of the buffer remaining to output. */
 		buf += line_len;
@@ -500,6 +499,23 @@ ssize_t writev_buffer_append_segment(int fd, writev_buffer_t *buf, const void *d
 		return 1;
 
 	if (buf->iovcnt == WRITEV_BUFFER_N_IOV && writev_buffer_flush(fd, buf) < 0)
+		return -1;
+
+	if (len > 0) {
+		buf->iov[buf->iovcnt].iov_base = (void *)data;
+		buf->iov[buf->iovcnt].iov_len = (size_t)len;
+		buf->iovcnt++;
+	}
+
+	return 1;
+}
+
+ssize_t writev_buffer_append_segment_no_flush(writev_buffer_t *buf, const void *data, ssize_t len)
+{
+	if (data == NULL)
+		return 1;
+
+	if (buf->iovcnt == WRITEV_BUFFER_N_IOV)
 		return -1;
 
 	if (len > 0) {
@@ -597,6 +613,9 @@ static void reopen_k8s_file(void)
 
 	/* Close the current k8s_log_fd */
 	close(k8s_log_fd);
+
+	/* Open with O_TRUNC: reset bytes written */
+	k8s_bytes_written = 0;
 
 	/* Open the log path file again */
 	k8s_log_fd = open(k8s_log_path_tmp, O_WRONLY | O_TRUNC | O_CREAT | O_CLOEXEC, 0600);
