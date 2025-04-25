@@ -1,3 +1,53 @@
+conmon (2.1.12-4) unstable; urgency=medium
+
+  * Team upload
+
+  [ Reinhard Tartler ]
+  * restrict tests to amd64
+    the test require qemu, no need to bother other architectures
+
+  [ Anshul Singh ]
+  * Turn off go vet to fix autopkgtest regression with Go1.24
+
+ -- Shengjing Zhu <zhsj@debian.org>  Fri, 14 Feb 2025 18:00:11 +0800
+
+conmon (2.1.12-3) unstable; urgency=medium
+
+  * autopkgtests/test-binary: make sure that patches are applied
+
+ -- Reinhard Tartler <siretart@tauware.de>  Wed, 23 Oct 2024 19:43:33 -0400
+
+conmon (2.1.12-2) unstable; urgency=medium
+
+  * Make autopkgtest more reliable
+    - backport patches from upstream to avoid libpod dependency,
+      which allows running the test against the golang code we
+      actually have in the distribution.
+    - also backport an upstream commit that adds a strategic sleep
+      to make the test less likely to fail randomly
+    - disable ginkgo color output
+  * Mark golang-github-containers-conmon-dev as Multi-arch: foreign
+
+ -- Reinhard Tartler <siretart@tauware.de>  Wed, 23 Oct 2024 06:47:02 -0400
+
+conmon (2.1.12-1) unstable; urgency=medium
+
+  * New upstream release
+  * debian/control: Update Vcs-Git fields
+
+ -- Reinhard Tartler <siretart@tauware.de>  Sat, 05 Oct 2024 12:00:39 -0400
+
+conmon (2.1.10+ds1-1) unstable; urgency=medium
+
+  * New upstream release
+  * Bug fix: "Healthcheck containers write error to system journal",
+    thanks to Matthew Horan (Closes: #1054629).
+  * Bug fix: "Fails to build source after successful build",
+    thanks to Lucas Nussbaum (Closes: #1044372).
+  * Bump standards version, no changes needed
+
+ -- Reinhard Tartler <siretart@tauware.de>  Mon, 12 Feb 2024 06:35:32 -0500
+
 conmon (2.1.6+ds1-1+pexip24u6) pexip; urgency=medium
 
   * Rebuild for move to main.

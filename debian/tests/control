@@ -1,0 +1,15 @@
+Tests: test-binary
+Depends: ca-certificates,
+         golang-blitiri-go-systemd-dev,
+         golang-github-containers-storage-dev,
+         golang-github-onsi-ginkgo-v2-dev,
+         golang-github-opencontainers-runtime-tools-dev,
+         golang-github-pkg-errors-dev,
+         golang-go,
+         golang-gomega-dev,
+         runc,
+         @,
+         @builddeps@,
+         @recommends@
+Restrictions: allow-stderr, isolation-machine, needs-root, rw-build-tree
+Architecture: amd64

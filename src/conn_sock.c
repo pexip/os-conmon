@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 
 #include "conn_sock.h"
+#include "ctr_exit.h"
 #include "globals.h"
 #include "utils.h"
 #include "config.h"
@@ -109,6 +110,14 @@ static void bind_relative_to_dir(int dir_fd, int sock_fd, const char *path)
 	if (bind(sock_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
 		pexit("Failed to bind to console-socket");
 }
+
+static void set_socket_buffers(G_GNUC_UNUSED int fd)
+{
+	/*
+	 * Nothing needed here for Linux - the default buffer sizes for unix domain sockets are large enough.
+	 */
+}
+
 #endif
 
 #ifdef __FreeBSD__
@@ -134,6 +143,18 @@ static void bind_relative_to_dir(int dir_fd, int sock_fd, const char *path)
 	if (fchmodat(dir_fd, addr.sun_path, 0700, AT_SYMLINK_NOFOLLOW))
 		pexit("Failed to change console-socket permissions");
 }
+
+static void set_socket_buffers(int fd)
+{
+	int sz = CONN_SOCK_BUF_SIZE;
+	if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &sz, sizeof(sz))) {
+		nwarn("failed to set socket receive buffer size");
+	}
+	if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof(sz))) {
+		nwarn("failed to set socket send buffer size");
+	}
+}
+
 #endif
 
 static char *setup_socket(int *fd, const char *path)
@@ -158,7 +179,7 @@ static char *setup_socket(int *fd, const char *path)
 		if (dname == NULL)
 			pexitf("Cannot get dirname for %s", csname);
 
-		sfd = open(dname, O_CREAT | O_PATH, 0600);
+		sfd = open(dname, O_CREAT | O_PATH | O_CLOEXEC, 0600);
 		if (sfd < 0)
 			pexit("Failed to create file for console-socket");
 
@@ -242,7 +263,7 @@ static char *bind_unix_socket(char *socket_relative_name, int sock_type, mode_t 
 	int socket_fd = -1;
 
 	/* get the parent_dir of the socket. We'll use this to get the location of the socket. */
-	char *parent_dir = socket_parent_dir(use_full_attach_path, max_socket_path_len());
+	_cleanup_free_ char *parent_dir = socket_parent_dir(use_full_attach_path, max_socket_path_len());
 
 	/*
 	 * To be able to access the location of the attach socket, without first creating the attach socket
@@ -250,7 +271,7 @@ static char *bind_unix_socket(char *socket_relative_name, int sock_type, mode_t 
 	 * the corresponding entry in `/proc/self/fd` to act as the path to base_path, then we use the socket_relative_name
 	 * to actually refer to the file where the socket will be created below.
 	 */
-	_cleanup_close_ int parent_dir_fd = open(parent_dir, O_PATH);
+	_cleanup_close_ int parent_dir_fd = open(parent_dir, O_PATH | O_CLOEXEC);
 	if (parent_dir_fd < 0)
 		pexitf("failed to open socket path parent dir %s", parent_dir);
 
@@ -293,7 +314,7 @@ char *socket_parent_dir(gboolean use_full_attach_path, size_t desired_len)
 {
 	/* if we're to use the full path, ignore the socket path and only use the bundle_path */
 	if (use_full_attach_path)
-		return opt_bundle_path;
+		return strdup(opt_bundle_path);
 
 	char *base_path = g_build_filename(opt_socket_path, opt_cuuid, NULL);
 
@@ -318,6 +339,9 @@ char *socket_parent_dir(gboolean use_full_attach_path, size_t desired_len)
 
 	if (symlink(opt_bundle_path, base_path) == -1)
 		pexit("Failed to create symlink for notify socket");
+
+	// Ensure the link is deleted when we exit
+	atexit(cleanup_socket_dir_symlink);
 
 	return base_path;
 }
@@ -353,6 +377,7 @@ static gboolean attach_cb(int fd, G_GNUC_UNUSED GIOCondition condition, gpointer
 			nwarn("Failed to accept client connection on attach socket");
 	} else {
 		struct remote_sock_s *remote_sock;
+		set_socket_buffers(new_fd);
 		if (srcsock->dest->readers == NULL) {
 			srcsock->dest->readers = g_ptr_array_new_with_free_func(free);
 		}
@@ -393,7 +418,7 @@ static gboolean read_remote_sock(struct remote_sock_s *sock)
 	if (SOCK_IS_STREAM(sock->sock_type)) {
 		num_read = read(sock->fd, sock->buf, CONN_SOCK_BUF_SIZE);
 	} else {
-		num_read = recvfrom(sock->fd, sock->buf, CONN_SOCK_BUF_SIZE - 1, 0, NULL, NULL);
+		num_read = recvfrom(sock->fd, sock->buf, CONN_SOCK_BUF_SIZE, 0, NULL, NULL);
 	}
 
 	if (num_read < 0)
@@ -407,17 +432,52 @@ static gboolean read_remote_sock(struct remote_sock_s *sock)
 	sock->off = 0;
 
 	if (SOCK_IS_NOTIFY(sock->sock_type)) {
-		/* Do what OCI runtime does - only pass READY=1 */
+		/* We pass a limited amount of safe messages here, as some existing or
+		   future ones could be security sensitive */
+		const char *passon_line[] = {
+			"READY=1", "RELOADING=1", "STOPPING=1", "WATCHDOG=1", "WATCHDOG=trigger",
+		};
+		const char *passon_prefix[] = {
+			"STATUS=",
+			"ERRNO=",
+			"BUSERROR=",
+			"MONOTONIC_USEC=",
+		};
+		char **lines;
+
 		sock->buf[num_read] = '\0';
-		if (strstr(sock->buf, "READY=1")) {
-			strncpy(sock->buf, "READY=1", 8);
-			sock->remaining = 7;
-		} else if (strstr(sock->buf, "WATCHDOG=1")) {
-			strncpy(sock->buf, "WATCHDOG=1", 11);
-			sock->remaining = 10;
-		} else {
-			sock->remaining = 0;
+		lines = g_strsplit_set(sock->buf, "\n\r", -1);
+		sock->remaining = 0;
+
+		for (size_t i = 0; lines[i] != NULL; i++) {
+			const char *line = lines[i];
+			gboolean pass_line = FALSE;
+
+			for (size_t j = 0; j < G_N_ELEMENTS(passon_line); j++) {
+				if (strcmp(line, passon_line[j]) == 0) {
+					pass_line = TRUE;
+					break;
+				}
+			}
+
+			for (size_t j = 0; !pass_line && j < G_N_ELEMENTS(passon_prefix); j++) {
+				if (g_str_has_prefix(line, passon_prefix[j])) {
+					pass_line = TRUE;
+					break;
+				}
+			}
+
+			/* This will always fit in sock->buf as we only pass through exact
+			   bytes from an existing sock->buf */
+			if (pass_line) {
+				if (sock->remaining > 0)
+					sock->buf[sock->remaining++] = '\n';
+
+				memcpy(sock->buf + sock->remaining, line, strlen(line));
+				sock->remaining += strlen(line);
+			}
 		}
+		g_strfreev(lines);
 	}
 
 	if (sock->remaining)

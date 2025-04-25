@@ -1,0 +1,17 @@
+#!/bin/sh -ex
+
+export LANG=C
+
+dpkg-source --before-build .
+
+export CONMON_BINARY=/usr/bin/conmon
+TMPDIR=$(mktemp -d)
+export HOME="${TMPDIR}/home"
+mkdir -p "${HOME}"
+# avoid ANSI coloring in build logs
+export GINGKO_COLOR=0
+# use Debian modules
+export GO111MODULE=off
+export GOPATH="${PWD}:/usr/share/gocode"
+
+go test -vet=off ./runner/... -count=1 -v

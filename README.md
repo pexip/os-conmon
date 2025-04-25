@@ -1,5 +1,3 @@
-[![Total alerts](https://img.shields.io/lgtm/alerts/g/containers/conmon.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/containers/conmon/alerts/)
-
 # conmon
 
 An OCI container runtime monitor.
@@ -93,7 +91,7 @@ installed, like [runc](https://github.com/opencontainers/runc) or
 
 It is possible to build a statically linked binary of conmon by using
 the officially provided
-[nix](https://nixos.org/nixos/packages.html?attr=conmon&channel=nixpkgs-unstable&query=conmon)
+[nix](https://nixos.org/nixos/packages.html?attr=conmon&channel=unstable&query=conmon)
 package and the derivation of it [within this repository](nix/). The
 builds are completely reproducible and will create a x86\_64/amd64
 stripped ELF binary for [glibc](https://www.gnu.org/software/libc).
