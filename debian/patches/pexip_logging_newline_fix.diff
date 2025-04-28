@@ -1,8 +1,6 @@
-Index: os-conmon/src/ctr_logging.c
-===================================================================
---- os-conmon.orig/src/ctr_logging.c
-+++ os-conmon/src/ctr_logging.c
-@@ -289,7 +289,6 @@ static int write_journald(int pipe, char
+--- conmon.orig/src/ctr_logging.c
++++ conmon/src/ctr_logging.c
+@@ -292,7 +292,6 @@ static int write_journald(int pipe, char
  		}
  
  		ssize_t msg_len = line_len + MESSAGE_EQ_LEN + *partial_buf_len;
@@ -10,7 +8,7 @@ Index: os-conmon/src/ctr_logging.c
  
  		_cleanup_free_ char *message = g_malloc(msg_len);
  
-@@ -297,6 +296,12 @@ static int write_journald(int pipe, char
+@@ -300,6 +299,12 @@ static int write_journald(int pipe, char
  		memcpy(message + MESSAGE_EQ_LEN, partial_buf, *partial_buf_len);
  		memcpy(message + MESSAGE_EQ_LEN + *partial_buf_len, buf, line_len);
  
@@ -20,6 +18,6 @@ Index: os-conmon/src/ctr_logging.c
 +			msg_len--;
 +		}
 +
- 		if (writev_buffer_append_segment(dev_null, &bufv, message, msg_len) < 0)
+ 		if (writev_buffer_append_segment_no_flush(&bufv, message, msg_len) < 0)
  			return -1;
  
