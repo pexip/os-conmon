@@ -1,3 +1,6 @@
+Ensure that we do not pass newlines to the logging function
+as this results in double newlines where journald passes to syslog
+
 --- conmon.orig/src/ctr_logging.c
 +++ conmon/src/ctr_logging.c
 @@ -292,7 +292,6 @@ static int write_journald(int pipe, char
